@@ -1,0 +1,109 @@
+---
+title: "Machine Learning Prediction Assignment"
+author: "Ed Chen"
+date: "February 28, 2016"
+output: html_document
+---
+
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. This project involves the use of data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. These participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+The data is provided from the website 
+http://groupware.les.inf.puc-rio.br/har 
+(see the section on the Weight Lifting Exercise Dataset) 
+where the data can be obtained as follows:
+
+Training Data:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+Test Data:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+
+### Preliminaries
+
+```{r}
+print( "Checking packages and files ............ " )
+
+# Load required packages 
+list.of.packages <- c("downloader", "caret", "randomForest")
+    new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+
+if( length(new.packages) ) { install.packages(new.packages) }
+library("downloader")
+library("caret")
+library("randomForest")
+
+# download files
+# MyWD <- getwd()
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+file_train <- "pml-training.csv"
+file_test  <- "pml-testing.csv"
+data_train <- paste(URL, file_train, sep="")
+data_test  <- paste(URL, file_test, sep="")
+
+if( !file.exists(file_train) ) { download(data_train, dest=file_train, mode="wb") }
+if( !file.exists(file_test) ) { download(data_test, dest=file_test, mode="wb") } 
+
+training=read.csv(file=file_train, head=TRUE, sep=",", na.strings=c("NA","#DIV/0!",""))
+testing=read.csv(file=file_test, head=TRUE, sep=",")
+```
+
+### First, "clean" the data (of nulls) 
+```{r}
+training <- training[,-seq(1:7)]
+testing <- testing[,-seq(1:7)]
+hasNA <- as.vector(sapply(training[,1:152], function(x) {length(which(is.na(x)))!=0} ))
+training <- training[, !hasNA]
+testing <- testing[, !hasNA]
+
+# Split training data 70:30 into Training and Testing subsets,
+# Use Principal Component Analysis on the training subset
+inTrain <- createDataPartition(training$classe, p = 0.7)[[1]]
+TrainingSubset <- training[inTrain,]
+TestingSubset <- training[-inTrain,]
+
+preProc <- preProcess(TrainingSubset[,-53], method="pca")
+trainPCA <- predict(preProc, TrainingSubset[,-53])
+trainPCA$classe <- TrainingSubset$classe
+testPCA <- predict(preProc, TestingSubset[,-53])
+testPCA$classe <- TestingSubset$classe
+```
+
+### Use "Random Forests" on the Training subset 
+```{r}
+fitFullRF <- randomForest(TrainingSubset$classe ~., data = TrainingSubset,importance = TRUE)
+predictFullRF <- predict(fitFullRF, TestingSubset)
+fullCM <- confusionMatrix(predictFullRF, TestingSubset$classe)
+
+fullCM$overall
+```
+
+### Use "Random Forests" on the pre-processed Training subset
+```{r}
+fitpcaRF <- randomForest(trainPCA$classe ~., data = trainPCA, importance = TRUE)
+predictpcaRF <- predict(fitpcaRF, testPCA)
+pcaCM <- confusionMatrix(predictpcaRF, testPCA$classe)
+pcaCM$overall
+```
+
+### Training Error
+In random forests, there is no need for cross-validation or a separate test set to get an unbiased estimate of the test set error. It is estimated internally during the run. However, the error does decrease with the number of trees. The following plot shows the
+training error vs # of trees.
+
+```{r}
+plot(fitFullRF, main="Error vs # of trees")
+```
+
+```{r}
+fullCM$overall[1] - pcaCM$overall[1]
+```
+
+### Finally, run Random Forest method on the actual test dataset
+```{r}
+finalRF <- randomForest(training$classe ~., data = training, importance = TRUE)
+Answer <- predict(finalRF, testing)
+```
